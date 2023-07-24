@@ -35,9 +35,6 @@ except ImportError:
 # This is a known good revision of LLVM for building the kernel
 GOOD_REVISION = 'c31c334e11186d2c0b6a68a9f5619a4050cb87b7'
 
-# The version of the Linux kernel that the script downloads if necessary
-DEFAULT_KERNEL_FOR_PGO = (7, 2, 0)
-
 parser = ArgumentParser(formatter_class=RawTextHelpFormatter)
 clone_options = parser.add_mutually_exclusive_group()
 opt_options = parser.add_mutually_exclusive_group()
@@ -547,18 +544,12 @@ if args.bolt or (args.pgo and [x for x in args.pgo if 'kernel' in x]):
             msg = f"Supplied kernel source version ('{found_version}') is older than the minimum required version ('{minimum_version}'), provide a newer version!"
             raise RuntimeError(msg)
     else:
-        # Turns (x, y, 0) into x.y and (x, y, 1) into x.y.1 to follow tarball names
-        ver_parts = [str(x) for x in DEFAULT_KERNEL_FOR_PGO]
-        if ver_parts[2] == '0':
-            ver_parts.remove('0')
-        lsm.location = Path(src_folder, f"linux-{'.'.join(ver_parts)}")
+        lsm.location = Path(src_folder, 'linux-7.2')
         lsm.patches = list(src_folder.glob('*.patch'))
 
-        lsm.tarball.base_download_url = f"https://cdn.kernel.org/pub/linux/kernel/v{ver_parts[0]}.x"
-        lsm.tarball.local_location = lsm.location.with_name(f"{lsm.location.name}.tar.xz")
-        lsm.tarball.remote_checksum_name = 'sha256sums.asc'
+        lsm.tarball.base_download_url = 'https://git.kernel.org/torvalds/t'
+        lsm.tarball.local_location = lsm.location.with_name(f"{lsm.location.name}.tar.gz")
 
-        tc_build.utils.print_header('Preparing Linux source for profiling runs')
         lsm.prepare()
 
 # Validate and configure LLVM source
