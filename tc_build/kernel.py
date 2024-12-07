@@ -38,6 +38,7 @@ class KernelBuilder(Builder):
     def __init__(self, arch: str) -> None:
         super().__init__()
 
+        self.allconfigs_disable: list[str] = ['DRM_WERROR', 'WERROR']
         self.bolt_instrumentation: bool = False
         self.bolt_sampling_output: Path = tc_build.utils.UNINIT_PATH
         self.config_targets: list[str] = []
@@ -101,9 +102,8 @@ class KernelBuilder(Builder):
             # pylint: disable-next=consider-using-with
             kconfig_allconfig = NamedTemporaryFile(dir=self.folders.build)  # ruff:ignore[open-file-with-context-handler]
 
-            configs_to_disable = ['DRM_WERROR', 'WERROR']
             kconfig_allconfig_text = ''.join(
-                f"CONFIG_{val}=n\n" for val in configs_to_disable
+                f"CONFIG_{val}=n\n" for val in self.allconfigs_disable
             ).encode('utf-8')
 
             kconfig_allconfig.write(kconfig_allconfig_text)
@@ -312,6 +312,22 @@ class PowerPC64KernelBuilder(PowerPCKernelBuilder):
     def __init__(self) -> None:
         super().__init__()
 
+        # Disable KALLSYMS, as "Inconsistent kallsyms data" can happen. This
+        # should not impact PGO coverage much.
+        self.allconfigs_disable += [
+            'DEBUG_LOCK_ALLOC',
+            'DEBUG_KMEMLEAK',
+            'DEBUG_NET_SMALL_RTNL',
+            'DEBUG_WW_MUTEX_SLOWPATH',
+            'FTRACE_SYSCALLS',
+            'KALLSYMS',
+            'KGDB_HONOUR_BLOCKLIST',
+            'KPROBES',
+            'LATENCYTOP',
+            'LOCKDEP',
+            'LOCK_STAT',
+            'PROVE_LOCKING',
+        ]
         self.config_targets = ['ppc64_guest_defconfig', 'disable-werror.config']
         # https://github.com/ClangBuiltLinux/linux/issues/1601
         self.needs_binutils = True
