@@ -6,6 +6,19 @@ src=$base/src
 
 set -eu
 
+case "$(uname -m)" in
+    "aarch64")
+        binutils_target=aarch64
+        llvm_targets=(AArch64 ARM) # for 32-bit vDSO
+        kernel_target=AArch64
+        ;;
+    "x86_64")
+        binutils_target=x86_64
+        llvm_targets=(X86)
+        kernel_target=${llvm_targets[0]}
+        ;;
+esac
+
 function parse_parameters() {
     while (($#)); do
         case $1 in
@@ -28,7 +41,7 @@ function do_binutils() {
     "$base"/build-binutils.py \
         --install-folder "$install" \
         --show-build-commands \
-        --targets x86_64
+        --targets "$binutils_target"
 }
 
 function do_deps() {
@@ -36,9 +49,9 @@ function do_deps() {
     [[ -z ${GITHUB_ACTIONS:-} ]] && return 0
 
     # Refresh mirrorlist to avoid dead mirrors
-    sudo apt-get update -y
+    apt-get update -y
 
-    sudo apt-get install -y --no-install-recommends \
+    apt-get install -y --no-install-recommends \
         bc \
         bison \
         ca-certificates \
@@ -86,7 +99,7 @@ from kernel import LLVMKernelBuilder
 builder = LLVMKernelBuilder()
 builder.folders.build = Path('$base/build/linux')
 builder.folders.source = Path('$linux')
-builder.matrix = {'defconfig': ['X86']}
+builder.matrix = {'defconfig': ['$kernel_target']}
 builder.toolchain_prefix = Path('$install')
 builder.silent = False
 
@@ -106,12 +119,13 @@ function do_llvm() {
         --distribution-profile rust \
         --install-folder "$install" \
         --install-target distribution \
+        --multicall \
         --projects clang lld \
         --quiet-cmake \
         --ref release/23.x \
         --shallow-clone \
         --show-build-commands \
-        --targets X86 \
+        --targets "${llvm_targets[@]}" \
         "${extra_args[@]}"
 }
 
