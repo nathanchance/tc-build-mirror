@@ -33,10 +33,10 @@ except ImportError:
     BOOL_ARGS = {'action': 'store_true'}
 
 # This is a known good revision of LLVM for building the kernel
-GOOD_REVISION = '51d823197cb40a57f25d00882546374d460c649e'
+GOOD_REVISION = 'c31c334e11186d2c0b6a68a9f5619a4050cb87b7'
 
 # The version of the Linux kernel that the script downloads if necessary
-DEFAULT_KERNEL_FOR_PGO = (7, 1, 0)
+DEFAULT_KERNEL_FOR_PGO = (7, 2, 0)
 
 parser = ArgumentParser(formatter_class=RawTextHelpFormatter)
 clone_options = parser.add_mutually_exclusive_group()
@@ -569,7 +569,14 @@ if args.llvm_folder:
 else:
     llvm_folder = Path(src_folder, 'llvm-project')
 llvm_source = LLVMSourceManager(llvm_folder)
-llvm_source.download(args.ref, args.shallow_clone)
+# https://llvm.org/docs/GettingStarted.html#getting-the-source-code-and-building-llvm
+llvm_git_configs = [
+    'remote.origin.fetch=^refs/heads/users/*',
+    'remote.origin.fetch=^refs/heads/revert-*',
+]
+llvm_source.download(
+    ref=args.ref, shallow=args.shallow_clone, configs=llvm_git_configs, blobless=True
+)
 if not (args.llvm_folder or args.no_update):
     llvm_source.update(args.ref)
 
