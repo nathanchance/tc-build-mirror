@@ -544,7 +544,7 @@ if args.bolt or (args.pgo and [x for x in args.pgo if 'kernel' in x]):
             msg = f"Supplied kernel source version ('{found_version}') is older than the minimum required version ('{minimum_version}'), provide a newer version!"
             raise RuntimeError(msg)
     else:
-        lsm.location = Path(src_folder, 'linux-7.2')
+        lsm.location = Path(src_folder, 'linux-7.3-rc2')
         lsm.patches = list(src_folder.glob('*.patch'))
 
         lsm.tarball.base_download_url = 'https://git.kernel.org/torvalds/t'
