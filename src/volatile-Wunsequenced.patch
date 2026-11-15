@@ -1,0 +1,268 @@
+diff --git a/arch/powerpc/xmon/xmon.c b/arch/powerpc/xmon/xmon.c
+index cb3a3244ae6f..90a8d7a8f42d 100644
+--- a/arch/powerpc/xmon/xmon.c
++++ b/arch/powerpc/xmon/xmon.c
+@@ -3240,8 +3240,9 @@ memzcan(void)
+ 		printf("%.8lx\n", a - mskip);
+ }
+ 
+-static void show_task(struct task_struct *volatile tsk)
++static void show_task(struct task_struct *volatile vol_tsk)
+ {
++	struct task_struct *tsk = vol_tsk;
+ 	unsigned int p_state = READ_ONCE(tsk->__state);
+ 	char state;
+ 
+diff --git a/block/blk-throttle.c b/block/blk-throttle.c
+index c5e26551956a..8e58e50bce4d 100644
+--- a/block/blk-throttle.c
++++ b/block/blk-throttle.c
+@@ -453,7 +453,8 @@ static void throtl_dequeue_tg(struct throtl_grp *tg)
+ static void throtl_schedule_pending_timer(struct throtl_service_queue *sq,
+ 					  unsigned long expires)
+ {
+-	unsigned long max_expire = jiffies + 8 * DFL_THROTL_SLICE;
++	unsigned long j = jiffies;
++	unsigned long max_expire = j + 8 * DFL_THROTL_SLICE;
+ 
+ 	/*
+ 	 * Since we are adjusting the throttle limit dynamically, the sleep
+@@ -466,7 +467,7 @@ static void throtl_schedule_pending_timer(struct throtl_service_queue *sq,
+ 		expires = max_expire;
+ 	mod_timer(&sq->pending_timer, expires);
+ 	throtl_log(sq, "schedule timer. delay=%lu jiffies=%lu",
+-		   expires - jiffies, jiffies);
++		   expires - j, j);
+ }
+ 
+ /**
+diff --git a/drivers/block/floppy.c b/drivers/block/floppy.c
+index c677d783811f..f6339d779be9 100644
+--- a/drivers/block/floppy.c
++++ b/drivers/block/floppy.c
+@@ -1830,13 +1830,14 @@ static void reset_fdc(void)
+ 
+ static void show_floppy(int fdc)
+ {
++	unsigned long j = jiffies;
+ 	int i;
+ 
+ 	pr_info("\n");
+ 	pr_info("floppy driver state\n");
+ 	pr_info("-------------------\n");
+ 	pr_info("now=%lu last interrupt=%lu diff=%lu last called handler=%ps\n",
+-		jiffies, interruptjiffies, jiffies - interruptjiffies,
++		j, interruptjiffies, j - interruptjiffies,
+ 		lasthandler);
+ 
+ 	pr_info("timeout_message=%s\n", timeout_message);
+diff --git a/drivers/misc/lkdtm/bugs.c b/drivers/misc/lkdtm/bugs.c
+index 2761685cf4f8..7c799fef89a8 100644
+--- a/drivers/misc/lkdtm/bugs.c
++++ b/drivers/misc/lkdtm/bugs.c
+@@ -472,12 +472,14 @@ struct lkdtm_cb_fam {
+ 	int array[] __counted_by(count);
+ };
+ 
+-static volatile int element_count = 4;
++static int element_count = 4;
+ 
+ static void lkdtm_FAM_BOUNDS(void)
+ {
+ 	struct lkdtm_cb_fam *inst;
+ 
++	OPTIMIZER_HIDE_VAR(element_count);
++
+ 	inst = kzalloc_flex(*inst, array, element_count + 1);
+ 	if (!inst) {
+ 		pr_err("FAIL: could not allocate test struct!\n");
+@@ -534,6 +536,8 @@ static void lkdtm_PTR_BOUNDS(void)
+ {
+ 	struct lkdtm_cb_ptr *inst;
+ 
++	OPTIMIZER_HIDE_VAR(element_count);
++
+ 	inst = kzalloc_obj(*inst);
+ 	if (!inst) {
+ 		pr_err("FAIL: could not allocate struct lkdtm_cb_ptr!\n");
+diff --git a/drivers/misc/lkdtm/usercopy.c b/drivers/misc/lkdtm/usercopy.c
+index 67db57249a34..6c561dc1bcaa 100644
+--- a/drivers/misc/lkdtm/usercopy.c
++++ b/drivers/misc/lkdtm/usercopy.c
+@@ -19,10 +19,15 @@
+  * hardened usercopy checks by added "unconst" to all the const copies,
+  * and making sure "cache_size" isn't optimized into a const.
+  */
++#define CACHE_SIZE 1024
+ static volatile size_t unconst;
+-static volatile size_t cache_size = 1024;
++static volatile size_t cache_size = CACHE_SIZE;
+ static struct kmem_cache *whitelist_cache;
+ 
++/* Whitelisted window in buffer, from kmem_cache_create_usercopy. */
++static volatile size_t cache_whitelist_offset = CACHE_SIZE / 4;
++static volatile size_t cache_whitelist_size = CACHE_SIZE / 16;
++
+ static const unsigned char test_text[] = "This is a test.\n";
+ 
+ /*
+@@ -204,7 +209,6 @@ static void do_usercopy_slab_whitelist(bool to_user)
+ 	unsigned long user_alloc;
+ 	unsigned char *buf = NULL;
+ 	unsigned char __user *user_addr;
+-	size_t offset, size;
+ 
+ 	/* Make sure cache was prepared. */
+ 	if (!whitelist_cache) {
+@@ -233,31 +237,31 @@ static void do_usercopy_slab_whitelist(bool to_user)
+ 
+ 	memset(buf, 'B', cache_size);
+ 
+-	/* Whitelisted window in buffer, from kmem_cache_create_usercopy. */
+-	offset = (cache_size / 4) + unconst;
+-	size = (cache_size / 16) + unconst;
+-
+ 	if (to_user) {
+ 		pr_info("attempting good copy_to_user inside whitelist\n");
+-		if (copy_to_user(user_addr, buf + offset, size)) {
++		if (copy_to_user(user_addr, buf + cache_whitelist_offset,
++				 cache_whitelist_size)) {
+ 			pr_warn("copy_to_user failed unexpectedly?!\n");
+ 			goto free_user;
+ 		}
+ 
+ 		pr_info("attempting bad copy_to_user outside whitelist\n");
+-		if (copy_to_user(user_addr, buf + offset - 1, size)) {
++		if (copy_to_user(user_addr, buf + cache_whitelist_offset - 1,
++				 cache_whitelist_size)) {
+ 			pr_warn("copy_to_user failed, but lacked Oops\n");
+ 			goto free_user;
+ 		}
+ 	} else {
+ 		pr_info("attempting good copy_from_user inside whitelist\n");
+-		if (copy_from_user(buf + offset, user_addr, size)) {
++		if (copy_from_user(buf + cache_whitelist_offset, user_addr,
++				   cache_whitelist_size)) {
+ 			pr_warn("copy_from_user failed unexpectedly?!\n");
+ 			goto free_user;
+ 		}
+ 
+ 		pr_info("attempting bad copy_from_user outside whitelist\n");
+-		if (copy_from_user(buf + offset - 1, user_addr, size)) {
++		if (copy_from_user(buf + cache_whitelist_offset - 1, user_addr,
++				   cache_whitelist_size)) {
+ 			pr_warn("copy_from_user failed, but lacked Oops\n");
+ 			goto free_user;
+ 		}
+@@ -428,8 +432,8 @@ void __init lkdtm_usercopy_init(void)
+ 	whitelist_cache =
+ 		kmem_cache_create_usercopy("lkdtm-usercopy", cache_size,
+ 					   0, 0,
+-					   cache_size / 4,
+-					   cache_size / 16,
++					   cache_whitelist_offset,
++					   cache_whitelist_size,
+ 					   NULL);
+ }
+ 
+diff --git a/drivers/net/ethernet/microchip/encx24j600.c b/drivers/net/ethernet/microchip/encx24j600.c
+index b011bf5c2305..ebc067cb2c9d 100644
+--- a/drivers/net/ethernet/microchip/encx24j600.c
++++ b/drivers/net/ethernet/microchip/encx24j600.c
+@@ -893,9 +893,10 @@ static netdev_tx_t encx24j600_tx(struct sk_buff *skb, struct net_device *dev)
+ static void encx24j600_tx_timeout(struct net_device *dev, unsigned int txqueue)
+ {
+ 	struct encx24j600_priv *priv = netdev_priv(dev);
++	unsigned long j = jiffies;
+ 
+ 	netif_err(priv, tx_err, dev, "TX timeout at %ld, latency %ld\n",
+-		  jiffies, jiffies - dev_trans_start(dev));
++		  j, j - dev_trans_start(dev));
+ 
+ 	dev->stats.tx_errors++;
+ 	netif_wake_queue(dev);
+diff --git a/drivers/net/ethernet/qualcomm/qca_spi.c b/drivers/net/ethernet/qualcomm/qca_spi.c
+index 38a779f4b866..249b4b549a12 100644
+--- a/drivers/net/ethernet/qualcomm/qca_spi.c
++++ b/drivers/net/ethernet/qualcomm/qca_spi.c
+@@ -801,8 +801,8 @@ qcaspi_netdev_tx_timeout(struct net_device *dev, unsigned int txqueue)
+ {
+ 	struct qcaspi *qca = netdev_priv(dev);
+ 
+-	netdev_info(qca->net_dev, "Transmit timeout at %ld, latency %ld\n",
+-		    jiffies, jiffies - dev_trans_start(dev));
++	netdev_info(qca->net_dev, "Transmit timeout, latency %ld\n",
++		    jiffies - dev_trans_start(dev));
+ 	qca->net_dev->stats.tx_errors++;
+ 	/* Trigger tx queue flush and QCA7000 reset */
+ 	set_bit(SPI_RESET, &qca->flags);
+diff --git a/kernel/rcu/tree_nocb.h b/kernel/rcu/tree_nocb.h
+index b6cfee4e5039..8448a7c578e8 100644
+--- a/kernel/rcu/tree_nocb.h
++++ b/kernel/rcu/tree_nocb.h
+@@ -1618,6 +1618,7 @@ static void show_rcu_nocb_state(struct rcu_data *rdp)
+ 	struct rcu_segcblist *rsclp = &rdp->cblist;
+ 	bool waslocked;
+ 	bool wassleep;
++	unsigned long j;
+ 
+ 	if (rdp->nocb_gp_rdp == rdp)
+ 		show_rcu_nocb_gp_state(rdp);
+@@ -1639,6 +1640,7 @@ static void show_rcu_nocb_state(struct rcu_data *rdp)
+ 		rsclp->gp_seq[RCU_NEXT_READY_TAIL].exp);
+ 	sprintf(bufn, "%ld", rsclp->seglen[RCU_NEXT_TAIL]);
+ 	sprintf(bufb, "%ld", rcu_cblist_n_cbs(&rdp->nocb_bypass));
++	j = jiffies;
+ 	pr_info("   CB %d^%d->%d %c%c%c%c%c F%ld L%ld C%d %c%s%c%s%c%s%c%s%c%s q%ld %c CPU %d%s\n",
+ 		rdp->cpu, rdp->nocb_gp_rdp->cpu,
+ 		nocb_next_rdp ? nocb_next_rdp->cpu : -1,
+@@ -1647,8 +1649,8 @@ static void show_rcu_nocb_state(struct rcu_data *rdp)
+ 		"lL"[raw_spin_is_locked(&rdp->nocb_lock)],
+ 		"sS"[!!rdp->nocb_cb_sleep],
+ 		".W"[swait_active(&rdp->nocb_cb_wq)],
+-		jiffies - rdp->nocb_bypass_first,
+-		jiffies - rdp->nocb_nobypass_last,
++		j - rdp->nocb_bypass_first,
++		j - rdp->nocb_nobypass_last,
+ 		rdp->nocb_nobypass_count,
+ 		".D"[rcu_segcblist_ready_cbs(rsclp)],
+ 		rcu_segcblist_segempty(rsclp, RCU_DONE_TAIL) ? "" : bufd,
+diff --git a/kernel/sched/topology.c b/kernel/sched/topology.c
+index 9d3a1b8dd393..cc746ec83920 100644
+--- a/kernel/sched/topology.c
++++ b/kernel/sched/topology.c
+@@ -1995,7 +1995,6 @@ sd_init(struct sched_domain_topology_level *tl,
+ 					| sd_flags
+ 					,
+ 
+-		.last_balance		= jiffies,
+ 		.balance_interval	= sd_weight,
+ 
+ 		/* 50% success rate */
+@@ -2005,10 +2004,11 @@ sd_init(struct sched_domain_topology_level *tl,
+ 		.newidle_stamp		= now,
+ 
+ 		.max_newidle_lb_cost	= 0,
+-		.last_decay_max_lb_cost	= jiffies,
+ 		.child			= child,
+ 		.name			= tl->name,
+ 	};
++	sd->last_balance = jiffies;
++	sd->last_decay_max_lb_cost = jiffies;
+ 
+ 	WARN_ONCE((sd->flags & (SD_SHARE_CPUCAPACITY | SD_ASYM_CPUCAPACITY)) ==
+ 		  (SD_SHARE_CPUCAPACITY | SD_ASYM_CPUCAPACITY),
+diff --git a/net/mptcp/protocol.c b/net/mptcp/protocol.c
+index 8968db58083e..8a9efebf3497 100644
+--- a/net/mptcp/protocol.c
++++ b/net/mptcp/protocol.c
+@@ -3041,7 +3041,8 @@ void mptcp_reset_tout_timer(struct mptcp_sock *msk, unsigned long fail_tout)
+ 		return;
+ 
+ 	close_timeout = (unsigned long)inet_csk(sk)->icsk_mtup.probe_timestamp -
+-			tcp_jiffies32 + jiffies + mptcp_close_timeout(sk);
++			tcp_jiffies32;
++	close_timeout += jiffies + mptcp_close_timeout(sk);
+ 
+ 	/* the close timeout takes precedence on the fail one, and here at least one of
+ 	 * them is active
