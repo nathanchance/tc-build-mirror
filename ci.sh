@@ -19,6 +19,18 @@ case "$(uname -m)" in
         ;;
 esac
 
+echo "[+] Checking if mirror is available"
+git_mirror_args=()
+if ping -c1 -w3 10.0.1.8 >/dev/null 2>&1; then
+    echo "[+] Mirror is available"
+    git_mirror_args+=(
+        -c url.http://10.0.1.8:50000/git/.insteadOf=https://git.kernel.org/
+        -c url.http://10.0.1.8:50000/git/.insteadOf=https://github.com/
+    )
+else
+    echo "[-] Mirror is unavailable"
+fi
+
 function parse_parameters() {
     while (($#)); do
         case $1 in
@@ -80,10 +92,11 @@ function do_kernel() {
     local linux=$src/$branch
 
     if [[ -d $linux ]]; then
-        git -C "$linux" fetch --depth=1 origin $branch
+        git -C "$linux" "${git_mirror_args[@]}" fetch --depth=1 origin $branch
         git -C "$linux" reset --hard FETCH_HEAD
     else
         git clone \
+            "${git_mirror_args[@]}" \
             --branch "$branch" \
             --depth=1 \
             --single-branch \
@@ -111,6 +124,21 @@ function do_llvm() {
     extra_args=()
     [[ -n ${GITHUB_ACTIONS:-} ]] && extra_args+=(--no-ccache)
 
+    local branch=release/23.x
+    local llvm=$src/llvm-project
+    if [[ -d $llvm ]]; then
+        git -C "$llvm" "${git_mirror_args[@]}" fetch --depth=1 origin $branch
+        git -C "$llvm" reset --hard FETCH_HEAD
+    else
+        git clone \
+            "${git_mirror_args[@]}" \
+            --branch "$branch" \
+            --depth=1 \
+            --single-branch \
+            https://github.com/llvm/llvm-project.git \
+            "$llvm"
+    fi
+
     "$base"/build-llvm.py \
         --assertions \
         --build-stage1-only \
@@ -119,11 +147,10 @@ function do_llvm() {
         --distribution-profile rust \
         --install-folder "$install" \
         --install-target distribution \
+        --llvm-folder "$llvm" \
         --multicall \
         --projects clang lld \
         --quiet-cmake \
-        --ref release/23.x \
-        --shallow-clone \
         --show-build-commands \
         --targets "${llvm_targets[@]}" \
         "${extra_args[@]}"
